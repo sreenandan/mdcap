@@ -15,25 +15,6 @@ Expand the name of the chart.
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-#{{/*
-#Create the headless service/Pod. This provides the DNS FQDN resolution/pod
-#*/}}
-#{{- define "mdcap.headlessService" -}}
-#apiVersion: v1
-#kind: Service
-#metadata:
-#  name: {{ .Release.Name }}-{{ .SubTemplateArgs.Component }}
-#spec:
-#  ports:
-#  - name: {{ .Release.Name }}-{{ .SubTemplateArgs.Component }}
-#    port: 65535
-#    protocol: UDP
-#    targetPort: 65535
-#  selector:
-#    app: {{ .Release.Name }}-{{ .SubTemplateArgs.Component }}
-#  type: ClusterIP
-#  clusterIP: None
-#{{- end -}}
 
 
 {{/*
