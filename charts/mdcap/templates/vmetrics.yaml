@@ -1,0 +1,167 @@
+{{ if .Values.vmetrics.enabled }}
+{{/*
+Copyright (C) 2021 Robin.io All Rights Reserved.
+*/}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-kubernetes-version
+  namespace: {{ .Release.Namespace }}
+data:
+  K8S_VERSION: {{ include "versionValidateK8s" . }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-vmetrics-configmap
+  namespace: {{ .Release.Namespace }}
+data:
+  {{ (.Files.Glob "scripts/vmetrics.sh").AsConfig | nindent 2 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    role: {{ .Release.Name }}-vmetrics-depl
+    release: {{ .Release.Name }}
+    app: {{ .Release.Name }}-vmetrics
+  name: {{ template "vmetrics.fullname" . }}
+{{- if .Values.vmetrics.annotations }}
+  annotations:
+{{ toYaml .Values.vmetrics.annotations | indent 4 }}
+{{- end }}
+spec:
+  replicas: {{ .Values.vmetrics.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-vmetrics
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+    {{- if .Release.IsUpgrade }}
+      maxUnavailable: 1
+    {{- else }}
+      maxUnavailable: 30%
+    {{- end }}
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/name: {{ .Release.Name }}-vmetrics
+        release: {{ .Release.Name }}
+        app: {{ .Release.Name }}-vmetrics
+      name: {{ .Release.Name }}-vmetrics
+{{- if .Values.vmetrics.annotations }}
+      annotations:
+{{ toYaml .Values.vmetrics.annotations | indent 8 }}
+{{- end }}
+    spec:
+{{ if .Values.imageCredentials.registry }}
+      imagePullSecrets:
+        - name:  {{ .Release.Name }}-imagepull-secret
+{{ end }}
+{{ if .Values.vmetrics.nodeSelector }}
+      nodeSelector:
+{{ toYaml .Values.vmetrics.nodeSelector | indent 8 }}
+{{ end }}
+      containers:
+      - command:
+        - /scripts/vmetrics.sh
+        env:
+        - name: MDCAP_NAME
+          value: {{ .Release.Name }}
+        - name: MDCAP_NS
+          value: {{ .Release.Namespace }}
+        - name: MDCAPDS_SITE1_IP
+        # This works for now, but needs to be replaced with site ip for multiple sites
+          value: {{ .Values.postgres.server }}
+        - name: ETCD_DATA_PORT_1
+          value: {{ .Values.vmetrics.mdcapds.etcd.ports.data | quote }}
+        - name: METRICS_RETENTION_PERIOD
+          value: {{ .Values.vmetrics.env.retention_period }}
+        image: "{{ .Values.vmetrics.image.repository }}:{{ .Values.vmetrics.image.tag }}"
+        imagePullPolicy: "{{ .Values.vmetrics.image.pullPolicy }}"
+        name: {{ .Release.Name }}-vmetrics
+        resources:
+{{ toYaml .Values.vmetrics.resources | indent 10 }}
+        volumeMounts:
+        - mountPath: /scripts/vmetrics.sh
+          name: entrypoint-script
+          subPath: vmetrics.sh
+        - mountPath: {{ .Values.vmetrics.persistentVolume.mountPath }}
+          name: {{ .Release.Name }}-vmetrics-data
+        - mountPath: /etc/mdcap/certs/cert.pem
+          name: cert-secret
+          readOnly: true
+          subPath: cert.pem
+        - mountPath: /etc/mdcap/certs/key.pem
+          name: key-secret
+          readOnly: true
+          subPath: key.pem
+      dnsConfig:
+        options:
+        - name: ndots
+          value: "1"
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: true
+      hostname: {{ .Release.Name }}-vmetrics
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      serviceAccount: default
+      serviceAccountName: default
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: entrypoint-script
+        configMap:
+          name: {{ .Release.Name }}-vmetrics-configmap
+          defaultMode: 0755
+      - name: {{ .Release.Name }}-vmetrics-data
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-vmetrics-pvc-data
+      - name: cert-secret
+        secret:
+          secretName: {{ .Release.Name }}-cert-secret
+          defaultMode: 0420
+      - name: key-secret
+        secret:
+          secretName: {{ .Release.Name }}-key-secret
+          defaultMode: 0420
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-vmetrics-pvc-data
+{{- if .Values.vmetrics.persistentVolume.annotations }}
+  annotations:
+{{ toYaml .Values.vmetrics.persistentVolume.annotations | indent 4 }}
+{{- end }}
+spec:
+  accessModes:
+    - {{ .Values.vmetrics.persistentVolume.accessMode }}
+  storageClassName: {{ include "vmetrics.storageclass.name" . }}
+  resources:
+    requests:
+      storage: {{ .Values.vmetrics.persistentVolume.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-vmetrics
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+  - name: {{ .Release.Name }}-vmetrics
+    port: 8428
+    protocol: TCP
+    targetPort: 8428
+  selector:
+    app: {{ .Release.Name }}-vmetrics
+  type: ClusterIP
+---
+{{ end }}

@@ -1,0 +1,15 @@
+apiVersion: 1
+datasources:
+  - name: MDCAP_METRICS
+    type: prometheus
+    access: proxy
+    basicAuth: false
+    orgId: 1
+    url: https://MDCAP_NAME-vmetrics.MDCAP_NS.svc.cluster.local:8428
+    isDefault: true                                                                                                                                           
+    version: 1
+    readOnly: false
+    withCredentials: false
+    jsonData:                                                                                                                                                 
+      httpMethod: POST
+      tlsSkipVerify: true

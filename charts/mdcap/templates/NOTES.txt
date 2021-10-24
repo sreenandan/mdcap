@@ -1,0 +1,134 @@
+{{/*
+Copyright (C) 2021 Robin.io All Rights Reserved.
+*/}}
+Thank you for installing {{ .Chart.Name }}. Your release is named {{ .Release.Name }}.
+
+Please be patient while the release installs. 
+
+The following deployments are installed in this release.
+  1. {{ .Release.Name }}-engine with {{ .Values.engine.replicaCount }} pods
+  2. {{ .Release.Name }}-artifactory with 1 pod
+  3. {{ .Release.Name }}-logstore with 1 pod
+  4. {{ .Release.Name }}-playground with 1 pod
+  5. {{ .Release.Name }}-eventserver with 1 pod
+  6. {{ .Release.Name }}-dashboard with 1 pod
+  7. {{ .Release.Name }}-nginx with 2 pods
+{{- if .Values.vmetrics.enabled }}
+  8. {{ .Release.Name }}-vmetrics with 1 pod
+  9. {{ .Release.Name }}-grafana with 1 pod
+{{- end }}
+
+To check the status of all the pods for this release, execute:
+  $ kubectl get pods -n {{ .Release.Namespace }}  | grep {{ .Release.Name }}
+
+
+To access through CLI:
+{{ if .Values.externalIp }}
+  1. Download the cli binary by executing following command on your local host:
+
+    IPV4:
+      curl -k -O https://{{ .Values.externalIp}}:{{ .Values.nginx.env.httpsNodePort }}/artifact/api/v1/mdcapbin/mdcap && chmod +x mdcap
+
+    IPV6:
+       curl -g -6 -k -O https://[{{ .Values.externalIp }}]:{{ .Values.nginx.env.httpsNodePort }}/artifact/api/v1/mdcapbin/mdcap && chmod +x mdcap
+
+  2. Point mdcap cli to mdcap server:
+
+    IPV4:
+      ./mdcap server-context set default https://{{ .Values.externalIp}}:{{ .Values.nginx.env.httpsNodePort }} -d
+
+    IPV6
+      ./mdcap server-context set default https://[{{ .Values.externalIp}}]:{{ .Values.nginx.env.httpsNodePort }} -d
+
+  3. Login to mdcap with your provided credentials:
+
+    ./mdcap login <user> -p <password>
+
+  4. For more help on mdcap cli options:
+
+    ./mdcap --help
+
+  Note: If the above command results in locale related error, please check if it is set correctly on your host. 
+  To check, you may execute the following command:
+   
+   locale
+
+  If LANG and LC_ALL are missing you may need to set them to the locale applicable to your host using following instructions:
+  (Below are the minimum number of values for posix locale generally applicable on POSIX compliant hosts, depending upon region your locale may vary)
+
+  export LC_ALL=C.UTF-8
+  export LANG=C.UTF-8
+
+To access through GUI:
+  1. Open the browser and access the UI pointing your browser to:
+   
+    IPV4:
+      https://{{ .Values.externalIp}}:{{ .Values.nginx.env.httpsNodePort }}
+
+    IPV6:
+      https://[{{ .Values.externalIp}}]:{{ .Values.nginx.env.httpsNodePort }}
+
+
+{{ else}}
+
+  1. Download the cli binary by executing following command on your local host:
+
+    IPV4:
+      curl -k -O https://<Cluster Node's Physical IP>:{{ .Values.nginx.env.httpsNodePort }}/artifact/api/v1/mdcapbin/mdcap && chmod +x mdcap
+
+    IPV6:
+       curl -g -6 -k -O https://[<Cluster Node's Physical IP>]:{{ .Values.nginx.env.httpsNodePort }}/artifact/api/v1/mdcapbin/mdcap && chmod +x mdcap
+
+
+  2. Point mdcap cli to mdcap server:
+
+    IPV4:
+      ./mdcap server-context set default https://<Cluster Node's Physical IP>:{{ .Values.nginx.env.httpsNodePort }} -d
+
+    IPV6:
+      ./mdcap server-context set default https://[<Cluster Node's Physical IP>]:{{ .Values.nginx.env.httpsNodePort }} -d
+
+  3. Login to mdcap with your provided credentials:
+
+    ./mdcap login <user> -p <password>
+
+  4. For more help on mdcap cli options:
+
+    ./mdcap --help
+
+  Note: If the above command results in locale related error, please check if it is set correctly on your host. 
+  To check, you may execute the following command:
+   
+   locale
+
+  If LANG and LC_ALL are missing you may need to set them to the locale applicable to your host using following instructions:
+  (Below are the minimum number of values for posix locale generally applicable on POSIX compliant hosts, depending upon region your locale may vary)
+
+  export LC_ALL=C.UTF-8
+  export LANG=C.UTF-8
+
+To access through GUI:
+  1. Open the browser and access the UI pointing your browser to:
+   
+    IPV4:
+      https://<Cluster Node's Physical IP>:{{ .Values.nginx.env.httpsNodePort }}
+
+    IPV6 :
+      https://[<Cluster Node's Physical IP>]:{{ .Values.nginx.env.httpsNodePort }}
+{{ end }}
+
+To learn more about the release, try:
+  $ helm status {{ .Release.Name }} -n {{ .Release.Namespace }}
+  $ helm get all {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+{{ if .Release.IsUpgrade }}
+  IMPORTANT:
+    There will be a small downtime associated with this release upgrade from 1.7.0 to 1.7.1. Following pods will be deleted first before their new pods are scheduled:
+      - logstore
+      - playground
+      - artifactory
+      - eventserver
+      - vmetrics
+
+    The service disruption for the duration of upgrade for these pods will be there.
+{{ end }}

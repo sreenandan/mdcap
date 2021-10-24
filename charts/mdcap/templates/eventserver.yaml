@@ -1,0 +1,166 @@
+{{/*
+Copyright (C) 2021 Robin.io All Rights Reserved.
+*/}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-eventserver-env
+  namespace: {{ .Release.Namespace }}
+data:
+  HTTPS: "true" 
+  MDCAP_SSL_CERTS_DIR: /data/certs
+  MDCAP_EVTSRV_RESTPORT: "8000"
+  POD_NAME: {{ .Release.Name }}-eventserver
+  MDCAP_DB_USER: {{ required "A value must be entered for .Values.postgres.User" .Values.postgres.user }}
+  MDCAP_DB_PASSWORD: {{ required "A value must be entered for .Values.postgres.Password" .Values.postgres.password }}
+  MDCAP_DB_SERVER: {{ required "A value must be entered for .Values.postgres.Server" .Values.postgres.server }}
+  MDCAP_DB_PORT: "{{ required "A value must be entered for .Values.postgres.Port" .Values.postgres.port }}"
+  MDCAP_DB_DATABASE: {{ required "A value must be entered for .Values.postgres.Database" .Values.postgres.database }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    role: {{ .Release.Name }}-eventserver-depl
+    release: {{ .Release.Name }}
+    app: {{ .Release.Name }}-eventserver
+  name: {{ template "eventserver.fullname" . }}
+{{- if .Values.eventserver.annotations }}
+  annotations:
+{{ toYaml .Values.eventserver.annotations | indent 4 }}
+{{- end }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-eventserver
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+    {{- if .Release.IsUpgrade }}
+      maxUnavailable: 1
+    {{- else }}
+      maxUnavailable: 30%
+    {{- end }}
+      maxSurge: 1
+  template:
+    metadata:
+      annotations:
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8000"
+        prometheus.io/scheme: https
+        prometheus.io/scrape: "true"
+{{- if .Values.eventserver.annotations }}
+{{ toYaml .Values.eventserver.annotations | indent 8 }}
+{{- end }}
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/name: {{ .Release.Name }}-eventserver
+        release: {{ .Release.Name }}
+        app: {{ .Release.Name }}-eventserver
+      name: {{ .Release.Name }}-eventserver
+    spec:
+{{ if .Values.imageCredentials.registry }}
+      imagePullSecrets:
+        - name:  {{ .Release.Name }}-imagepull-secret
+{{ end }}
+{{ if .Values.eventserver.nodeSelector }}
+      nodeSelector:
+{{ toYaml .Values.eventserver.nodeSelector | indent 8 }}
+{{ end }}
+      containers:
+      #- command: [ "/bin/sh"]
+      #  args: [ "-c", "sleep 9999"]
+      - command:
+        - /event-server
+        envFrom:
+        - configMapRef:
+            name: {{ .Release.Name }}-eventserver-env
+        image: "{{ .Values.eventserver.image.repository }}:{{ .Values.eventserver.image.tag }}"
+        imagePullPolicy: "{{ .Values.eventserver.image.pullPolicy }}"
+        name: {{ .Release.Name }}-eventserver
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8000
+            scheme: HTTPS
+{{ toYaml .Values.eventserver.livenessProbe | indent 10 }}
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8000
+            scheme: HTTPS
+{{ toYaml .Values.eventserver.livenessProbe | indent 10 }}
+        resources:
+{{ toYaml .Values.eventserver.resources | indent 10 }}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /data/certs/cert.pem
+          name: cert-secret
+          readOnly: true
+          subPath: cert.pem
+        - mountPath: /data/certs/key.pem
+          name: key-secret
+          readOnly: true
+          subPath: key.pem
+        - mountPath: "{{ .Values.eventserver.persistentVolume.mountPath }}"
+          name: {{ .Release.Name }}-eventserver-data
+      dnsConfig:
+          options:
+          - name: ndots
+            value: "1"
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: true
+      hostname: {{ .Release.Name }}-eventserver
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: default
+      serviceAccountName: default
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: {{ .Release.Name }}-eventserver-data
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-eventserver-pvc-data
+      - name: cert-secret
+        secret:
+          secretName: {{ .Release.Name }}-cert-secret
+          defaultMode: 0420
+      - name: key-secret
+        secret:
+          secretName: {{ .Release.Name }}-key-secret
+          defaultMode: 0420
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-eventserver-pvc-data
+{{- if .Values.eventserver.persistentVolume.annotations }}
+  annotations:
+{{ toYaml .Values.eventserver.persistentVolume.annotations | indent 4 }}
+{{- end }}
+spec:
+  accessModes:
+    - {{ .Values.eventserver.persistentVolume.accessMode }}
+  storageClassName: {{ include "eventserver.storageclass.name" . }} 
+  resources:
+    requests:
+      storage: {{ .Values.eventserver.persistentVolume.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-eventserver
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+    - name: {{ .Release.Name }}-eventserver
+      port: 8000
+      protocol: TCP
+  selector:
+    app: {{ .Release.Name }}-eventserver
+  type: ClusterIP

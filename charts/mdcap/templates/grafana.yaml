@@ -1,0 +1,185 @@
+{{ if .Values.vmetrics.enabled }}
+{{/*
+Copyright (C) 2021 Robin.io All Rights Reserved.
+*/}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-grafana-ini
+  namespace: {{ .Release.Namespace }}
+data:
+  {{ (.Files.Glob "scripts/grafana.ini").AsConfig | nindent 2 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-grafana-dashboards
+  namespace: {{ .Release.Namespace }}
+data:
+  {{ (.Files.Glob "dashboards/*").AsConfig | nindent 2 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-grafana-configs
+  namespace: {{ .Release.Namespace }}
+data:
+  {{ (.Files.Glob "configs/*").AsConfig | nindent 2 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    role: {{ .Release.Name }}-grafana-depl
+    release: {{ .Release.Name }}
+    app: {{ .Release.Name }}-grafana
+  name: {{ template "grafana.fullname" . }}
+{{- if .Values.grafana.annotations }}
+  annotations:
+{{ toYaml .Values.grafana.annotations | indent 4 }}
+{{- end }}
+spec:
+  replicas: {{ .Values.grafana.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-grafana
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 30%
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/name: {{ .Release.Name }}-grafana
+        role: {{ .Release.Name }}-grafana-depl
+        release: {{ .Release.Name }}
+        app: {{ .Release.Name }}-grafana
+{{- if .Values.grafana.annotations }}
+      annotations:
+{{ toYaml .Values.grafana.annotations | indent 8 }}
+{{- end }}
+      name: {{ template "grafana.fullname" . }}
+    spec:
+{{ if .Values.imageCredentials.registry }}
+      imagePullSecrets:
+        - name:  {{ .Release.Name }}-imagepull-secret
+{{ end }}
+{{ if .Values.grafana.nodeSelector }}
+      nodeSelector:
+{{ toYaml .Values.grafana.nodeSelector | indent 8 }}
+{{ end }}
+      containers:
+      - command: ["/bin/sh","-c"]
+        args:
+          - |
+{{ .Files.Get "scripts/grafana.sh" | indent 12 }}
+        env:
+        - name: MDCAP_NGINX_HOST
+          value: {{ .Release.Name }}-nginx.{{ .Release.Namespace }}.svc.cluster.local
+        - name: MDCAP_NAME
+          value: {{ .Release.Name }}
+        - name: MDCAP_NS
+          value: {{ .Release.Namespace }}
+        - name: GF_PATHS_DATA
+          value: {{ .Values.grafana.persistentVolume.mountPath }}/data
+        image: "{{ .Values.grafana.image.repository }}:{{ .Values.grafana.image.tag }}"
+        imagePullPolicy: "{{ .Values.grafana.image.pullPolicy }}"
+        name: {{ .Release.Name }}-grafana
+        securityContext:
+          runAsUser: 0
+        resources:
+{{ toYaml .Values.grafana.resources | indent 10 }}
+        volumeMounts:
+        - mountPath: {{ .Values.grafana.persistentVolume.mountPath }}
+          name: {{ .Release.Name }}-grafana-data
+        - mountPath: /etc/grafana/mdcap/configs
+          name: {{ .Release.Name }}-grafana-configs
+        - mountPath: /etc/grafana/mdcap/dashboards
+          name: {{ .Release.Name }}-grafana-dashboards
+        - mountPath: {{ .Values.grafana.ini.path }}
+          name: {{ .Release.Name }}-grafana-ini
+          subPath: grafana.ini
+        - mountPath: /etc/mdcap/certs/cert.pem
+          name: cert-secret
+          subPath: cert.pem
+        - mountPath: /etc/mdcap/certs/key.pem
+          name: key-secret
+          subPath: key.pem
+      dnsConfig:
+        options:
+        - name: ndots
+          value: "1"
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: true
+      hostname: {{ .Release.Name }}-grafana
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      serviceAccount: default
+      serviceAccountName: default
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: {{ .Release.Name }}-grafana-configs
+        configMap:
+          name: {{ .Release.Name }}-grafana-configs
+          defaultMode: 0755
+      - name: {{ .Release.Name }}-grafana-dashboards
+        configMap:
+          name: {{ .Release.Name }}-grafana-dashboards
+          defaultMode: 0755
+      - name: {{ .Release.Name }}-grafana-ini
+        configMap:
+          name: {{ .Release.Name }}-grafana-ini
+          defaultMode: 0755
+      - name: {{ .Release.Name }}-grafana-data
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-grafana-pvc-data
+      - name: cert-secret
+        secret:
+          secretName: {{ .Release.Name }}-cert-secret
+          defaultMode: 0755
+      - name: key-secret
+        secret:
+          secretName: {{ .Release.Name }}-key-secret
+          defaultMode: 0755
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-grafana-pvc-data
+{{- if .Values.grafana.persistentVolume.annotations }}
+  annotations:
+{{ toYaml .Values.grafana.persistentVolume.annotations | indent 4 }}
+{{- end }}
+spec:
+  accessModes:
+    - {{ .Values.grafana.persistentVolume.accessMode }}
+  storageClassName: {{ include "vmetrics.storageclass.name" . }}
+  resources:
+    requests:
+      storage: {{ .Values.grafana.persistentVolume.size }}
+---
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-grafana
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+  - name: {{ .Release.Name }}-grafana
+    port: 3000
+    protocol: TCP
+    targetPort: 3000
+  selector:
+    app: {{ .Release.Name }}-grafana
+  type: ClusterIP
+{{ end }}

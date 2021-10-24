@@ -1,0 +1,286 @@
+{{/*
+Copyright (C) 2021 Robin.io All Rights Reserved.
+*/}}
+---
+apiVersion: v1
+data:
+  MDCAP_ADMIN_PASSWORD: {{ "admin" | b64enc }}
+kind: Secret
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-engine-secret
+  namespace: {{ .Release.Namespace }}
+type: opaque
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-engine-entrypoint-configmap
+  namespace: {{ .Release.Namespace }}
+data:
+  {{ (.Files.Glob "scripts/engine-entrypoint.sh").AsConfig | nindent 2 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-engine-config
+  namespace: {{ .Release.Namespace }}
+data:
+  {{ (.Files.Glob "scripts/config/engine.config").AsConfig | nindent 2 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-engine-env
+  namespace: {{ .Release.Namespace }}
+data:
+  MDCAP_RELEASE_NAME: {{ .Release.Name | quote }}
+  MDCAP_OSS_URL: ""
+  MDCAP_ENV: ""
+  MDCAP_DC: ""
+  OSS_URL_AUTHORIZATION: ""
+  OSS_URL_APIKEY: ""
+  OSS_URL_WSO2: ""
+  KEYCLOAK_SERVER: ""
+  KEYCLOAK_REALM: ""
+  KEYCLOAK_CLIENT_ID: ""
+  AUTO_ARCHIVE: "True"
+  MDCAP_EVTSRV_HOST: {{ .Release.Name }}-eventserver.{{ .Release.Namespace }}.svc.cluster.local
+  RORC_PORT: {{ .Values.engine.rorcPort | quote }}
+  MDCAP_BASE_CLUSTER: "K8SNATIVE"
+  RORC_DEFAULT_FUNCTION: "changeme"
+  LIVENESS_CHECK: "False"
+  MDCAP_ADMIN_USERNAME: admin
+  ARCHIVE_AGE: "86400"
+  MDCAP_LOG_HOST: {{ .Release.Name }}-logstore.{{ .Release.Namespace }}.svc.cluster.local
+  MDCAP_LOG_URL: https://{{ .Release.Name }}-logstore.{{ .Release.Namespace }}.svc.cluster.local:8000
+{{ if .Values.vmetrics.enabled }}
+  METRICS_IP: {{ .Release.Name }}-vmetrics.{{ .Release.Namespace }}.svc.cluster.local
+  METRICS_GRAFANA_IP: {{ .Release.Name }}-grafana.{{ .Release.Namespace }}.svc.cluster.local
+  METRICS_GRAFANA_USER: {{ .Values.grafana.auth.password }}
+  METRICS_GRAFANA_PASSWORD: {{ .Values.grafana.auth.username }}
+  METRICS_GRAFANA_DATA_DIR: {{ .Values.grafana.persistentVolume.mountPath}}
+{{ end }}
+  DEBUGMODE: "True"
+  MDCAP_CDN_URL: https://{{ .Release.Name }}-artifactory.{{ .Release.Namespace }}.svc.cluster.local:8443
+  MDCAP_CDN_HTTP_URL: http://{{ .Release.Name }}-artifactory-np-01.{{ .Release.Namespace }}.svc.cluster.local:8080
+  NGINX_NP_PORT_HTTP: "{{ required "A value must be entered for Values.nginx.env.httpNodePort" .Values.nginx.env.httpNodePort }}"
+{{- if .Values.externalIp }}
+  KEYCLOAK_REDIRECT_URI: "https://{{ .Values.externalIp }}:{{ .Values.nginx.env.httpsNodePort }}/login"
+{{- else }}
+  KEYCLOAK_REDIRECT_URI: ""
+{{- end }}
+  MDCAP_CLI_VERSION: "1.7.1-7"
+  MDCAP_SSL_CERTS_DIR: /etc/mdcap/certs
+  POD_NAME: {{ .Release.Name }}-engine
+  MDCAP_DEFAULT_CONTEXT: "https://localhost:{{ .Values.engine.rorcPort }}"
+  MDCAP_DB_USER: {{ required "A value must be entered for .Values.postgres.User" .Values.postgres.user }}
+  MDCAP_DB_PASSWORD: {{ required "A value must be entered for .Values.postgres.Password" .Values.postgres.password }}
+  MDCAP_DB_SERVER: {{ required "A value must be entered for .Values.postgres.Server" .Values.postgres.server }}
+  MDCAP_DB_PORT: "{{ required "A value must be entered for .Values.postgres.Port" .Values.postgres.port }}"
+  MDCAP_DB_READ_PORT: "{{ .Values.postgres.readport }}"
+  MDCAP_DB_DATABASE: {{ required "A value must be entered for .Values.postgres.Database" .Values.postgres.database }}
+  ARCHIVE_TIME: "2:30"
+  NGINX_NP_PORT: "{{ required "A value must be entered for Values.nginx.env.httspNodePort" .Values.nginx.env.httpsNodePort }}"
+  MDCAP_SCRIPTS_PATH: /scripts
+  MDCAP_ENGINE_HOST: {{ .Release.Name }}-engine.{{ .Release.Namespace }}.svc.cluster.local
+  RORC_DEFAULT_ETYPE: BM
+  POD_NAMESPACE: {{ .Release.Namespace }}
+{{ if .Values.externalIp }}
+  MDCAP_NGINX_PUBLIC_IP: {{ .Values.externalIp }}
+{{ end }}
+  INIT_WORKER_IMG: "{{ .Values.taskrunner.image.repository }}:{{ .Values.taskrunner.image.tag }}"
+{{ if .Values.imageCredentials.registry }}
+  PRIVATE_REGISTRY_FETCH: "True"
+{{end}}
+{{- if .Values.taskrunner.annotations }}
+  WORKER_POD_ANNOTATIONS: {{ include "annotationsToStr" . -}}
+{{- end }}
+  ROBIN_VERSION_533: {{ include "robinVersion533" . | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    role: {{ .Release.Name }}-engine-depl
+    app: {{ .Release.Name }}-engine
+    release: {{ .Release.Name }}
+  name: {{ template "engine.fullname" . }}
+{{- if .Values.engine.annotations }}
+  annotations:
+{{ toYaml .Values.engine.annotations | indent 4 }}
+{{- end }}
+spec:
+  replicas: {{ .Values.engine.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-engine
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 30%
+      maxSurge: 1
+  template:
+    metadata:
+      annotations:
+        prometheus.io/path: /api/v1/metrics
+        prometheus.io/port: "8000"
+        prometheus.io/scheme: https
+        prometheus.io/scrape: "true"
+{{- if .Values.engine.annotations }}
+{{ toYaml .Values.engine.annotations | indent 8 }}
+{{- end }}
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/name: {{ .Release.Name }}-engine
+        app: {{ .Release.Name }}-engine
+        release: {{ .Release.Name }}
+      name: {{ .Release.Name }}-engine
+    spec:
+{{ if .Values.imageCredentials.registry }}
+      imagePullSecrets:
+        - name:  {{ .Release.Name }}-imagepull-secret
+{{ end }}
+{{ if .Values.engine.nodeSelector }}
+      nodeSelector:
+{{ toYaml .Values.engine.nodeSelector | indent 8 }}
+{{ end }}
+{{ if .Values.vmetrics.enabled }}
+      initContainers:
+      - name: artifactory-check
+        image: "{{ .Values.artifactory.image.repository }}:{{ .Values.artifactory.image.tag }}"  
+        command: ['sh', '-c', 'until curl -i -s -k -X HEAD https://{{ .Release.Name }}-artifactory.{{ .Release.Namespace }}.svc.cluster.local:8443/artifact/api/v1/mdcapbin/mdcap | grep -w 200; do echo waiting for artifactory; sleep 2; done;' ]
+        resources:
+              requests:
+                cpu: 500m
+                memory: 512Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+      - name: mdcap-grafana-check
+        image: "{{ .Values.engine.image.repository }}:{{ .Values.engine.image.tag }}" 
+        command: ['sh', '-c', 'until curl --fail --connect-timeout 2 -k https://{{ .Release.Name }}-grafana.{{ .Release.Namespace }}.svc.cluster.local:3000; do echo waiting for grafana; sleep 2; done;' ]
+        resources:
+              requests:
+                cpu: 500m
+                memory: 512Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+{{ end }}
+      containers:
+      - command:
+        - /engine-entrypoint.sh
+        - /bin/bash
+        envFrom:
+        - configMapRef:
+            name: {{ .Release.Name }}-engine-env
+        env:
+        - name: MDCAP_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: MDCAP_ADMIN_PASSWORD
+              name: {{ .Release.Name }}-engine-secret
+        image: "{{ .Values.engine.image.repository }}:{{ .Values.engine.image.tag }}"
+        imagePullPolicy: "{{ .Values.engine.image.pullPolicy }}"
+        name: {{ .Release.Name }}-engine
+        livenessProbe:
+{{ toYaml .Values.engine.livenessProbe | indent 10 }}
+        readinessProbe:
+{{ toYaml .Values.engine.readinessProbe | indent 10 }}
+        resources:
+{{ toYaml .Values.engine.resources | indent 10 }}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /engine-entrypoint.sh
+          name: entrypoint-script
+          subPath: engine-entrypoint.sh
+        - mountPath: /etc/mdcap/certs/cert.pem
+          name: cert-secret
+          readOnly: true
+          subPath: cert.pem
+        - mountPath: /etc/mdcap/certs/key.pem
+          name: key-secret
+          readOnly: true
+          subPath: key.pem
+        - mountPath: /etc/mdcap/config
+          name: {{ .Release.Name }}-engine-config
+{{- if .Values.vmetrics.enabled }}
+        - mountPath: {{ .Values.vmetrics.persistentVolume.mountPath }}
+          name: {{ .Release.Name }}-vmetrics-data
+        - mountPath: {{ .Values.grafana.persistentVolume.mountPath }}
+          name: {{ .Release.Name }}-grafana-data
+{{- end }}
+{{- if .Values.engine.mountSrcHostPath }}
+        - mountPath: /mdcap/scripts/app
+          name: {{ .Release.Name }}-engine-src
+{{- end }}
+      dnsConfig:
+        options:
+        - name: ndots
+          value: "1"
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: true
+      hostname: {{ .Release.Name }}-engine
+      priority: 0
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: default
+      serviceAccountName: default
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: entrypoint-script
+        configMap:
+          name: {{ .Release.Name }}-engine-entrypoint-configmap
+          defaultMode: 0755
+      - name: cert-secret
+        secret:
+          secretName: {{ .Release.Name }}-cert-secret
+          defaultMode: 0420
+      - name: key-secret
+        secret:
+          secretName: {{ .Release.Name }}-key-secret
+          defaultMode: 0420
+      - name: {{ .Release.Name }}-engine-config
+        configMap:
+          defaultMode: 420
+          name: {{ .Release.Name }}-engine-config
+{{- if .Values.vmetrics.enabled }}
+      - name: {{ .Release.Name }}-vmetrics-data
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-vmetrics-pvc-data
+      - name: {{ .Release.Name }}-grafana-data
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-grafana-pvc-data
+{{- end }}
+{{- if .Values.engine.mountSrcHostPath }}
+      - name: {{ .Release.Name }}-engine-src
+        hostPath:
+          path: {{ .Values.engine.mountSrcHostPath }}
+          type: Directory
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-engine
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: {{ .Release.Name }}-engine
+  type: ClusterIP
+  ports:
+    - name: engine
+      port: 8000
+      protocol: TCP
+      targetPort: 8000
+---

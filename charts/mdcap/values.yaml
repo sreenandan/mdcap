@@ -1,0 +1,586 @@
+# Chart nameoverride
+nameOverride: ""
+# provide this global value for storage class name. This will be used
+# by all the componets for the release. In case you need to specify different
+# storage class per component, remove this storage class and fill the name
+# for the storageClass per component under 
+# <componentName>.persistentVolume.storageClass
+storageClassNameOverride: "robin"
+# If your release needs to provide an access from outside the cluster, set this.
+# This will be the case if you need to use this release for jobs such as 
+# installing the OS on the Bare Metal machines which are located outside
+# of the cluster. If you have a dedicated externalIP for this cluster, provide it
+# here. If you do not know what IP to provide you can provide the IP of any node
+# participating in the cluster. Choose the IP for which the default gateway is set.
+# Please make sure that the IP is always up. In case, the IPs on that node are assigned
+# dynamically and are subject to a change anytime, like DHCP, you may wish to reserve the IP.  
+externalIp: ""
+# mdcap build number
+buildNumber: 1.7.1-7
+# In case you are using private image repository, provide your credentials here.
+# Important: if you are using the private repositories make sure that each of the repository
+# is upadated in the compoentts below.
+imageCredentials:
+  registry: "artifactory.robinsystems.com"
+  username: "kapil"
+  password: "robin123"
+  email: "kapil@robin.io"
+# Artifactory pod implements a http/https server and also caches some specific
+# files that transferred among the pods. 
+
+#artifactory configurables
+artifactory:
+  # artifactory container name 
+  name: artifactory
+  # the repository for the docker image and the tag of the image
+  image:
+    repository: artifactory.robinsystems.com/docker/mdcap/helm/mdcap-workersimulator
+    tag: 1.7.1-7
+    pullPolicy: IfNotPresent
+  # The CPU and the memory request for the artifactory pod.
+  resources:
+    limits:
+      cpu: 2
+      memory: 2Gi
+    requests:
+      cpu: 2
+      memory: 2Gi
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    periodSeconds: 5
+    failureThreshold: 2
+    initialDelaySeconds: 5
+    successThreshold: 1
+    timeoutSeconds: 2
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    periodSeconds: 5
+    failureThreshold: 2
+    initialDelaySeconds: 5
+    successThreshold: 1
+    timeoutSeconds: 2
+  # Robin only, Please specify any compute helm annotations
+  annotations:
+    robin.io/robinrpool: default
+    robin.io/roundrobin: host
+  # Node labels for artifactory pod assignment
+  # Ref: https://kubernetes.io/docs/user-guide/node-selection/
+  #
+  nodeSelector: {}
+  # Configurables for the persistence.
+  # This assumes there is a storage class always available that 
+  # can carve out a volume when the pod comes up and subsequently
+  # binds a PVC to the PV
+  persistentVolume:
+    ## artifactory data Persistent Volume access modes
+    ## Must match those of dynamic provisioner
+    accessMode: ReadWriteOnce
+    ## artifactory data Persistent Volume mount root path
+    ##
+    mountPath: /data
+    ## artifactory data Persistent Volume size
+    size: 10Gi
+    # name of the storage class which provides Dynamic provisioning 
+    storageClass: "robin"
+    # Robin only, Please specify any storage helm annotations
+    annotations:
+      robin.io/rpool: default
+# For each task this pod is responsible to store the logs
+logstore:
+  # logstore container name 
+  name: logstore
+  # the repository for the docker image and the tag of the image
+  image:
+    repository: artifactory.robinsystems.com/docker/mdcap/helm/mdcap-logstore-src
+    tag: 1.7.1-7
+    pullPolicy: IfNotPresent
+  # Compute and the memory needed by the pod
+  resources:
+    limits:
+      cpu: 1
+      memory: 1Gi
+    requests:
+      cpu: 1
+      memory: 1Gi
+  livenessProbe:
+    failureThreshold: 2
+    initialDelaySeconds: 5
+    periodSeconds: 2
+    successThreshold: 1
+    timeoutSeconds: 2
+  readinessProbe:
+    failureThreshold: 2
+    initialDelaySeconds: 5
+    periodSeconds: 2
+    successThreshold: 1
+    timeoutSeconds: 2
+  # Robin only, Please specify any compute helm annotations
+  annotations:
+    robin.io/robinrpool: default
+    robin.io/roundrobin: host
+  # Node labels for logstore pod assignment
+  # Ref: https://kubernetes.io/docs/user-guide/node-selection/
+  #
+  nodeSelector: {}
+  # Configurables for the persistence.
+  # This assumes there is a storage class always available that 
+  # can carve out a volume when the pod comes up and subsequently
+  # binds a PVC to the PV
+  persistentVolume:
+    ## artifactory data Persistent Volume access modes
+    ## Must match those of dynamic provisioner
+    accessMode: ReadWriteOnce
+    ## artifactory data Persistent Volume mount root path
+    ##
+    mountPath: /data
+    ## artifactory data Persistent Volume size
+    size: 10Gi
+    # name of the storage class which provides Dynamic provisioning 
+    storageClass: "robin"
+    # Robin only, Please specify any storage helm annotations
+    annotations:
+      robin.io/rpool: default
+# Playground pod gives one access to the MDCAP cli. Provides the users
+# access to the linux terminal/shell which may be used to create and upload
+# functions to the engine pod
+playground:
+  # playground container name
+  name: playground
+  # the repository for the docker image and the tag of the image
+  image:
+    repository: artifactory.robinsystems.com/docker/mdcap/helm/mdcap-playground-slim-src
+    tag: 1.7.1-7
+    pullPolicy: IfNotPresent
+  # Compute and the memory needed by the pod
+  resources:
+    limits:
+      cpu: 1
+      memory: 1Gi
+    requests:
+      cpu: 1
+      memory: 1Gi
+  livenessProbe:
+    failureThreshold: 2
+    initialDelaySeconds: 5
+    periodSeconds: 2
+    successThreshold: 1
+    tcpSocket:
+      port: 22
+    timeoutSeconds: 2
+  readinessProbe:
+    failureThreshold: 2
+    initialDelaySeconds: 5
+    periodSeconds: 2
+    successThreshold: 1
+    tcpSocket:
+      port: 22
+    timeoutSeconds: 2
+  env:
+    # sshNodePort is the node port of nginx which is used to login into
+    # playground, this port is configured and routed thru nginx and not
+    # created for playground directly
+    sshNodePort: 30022
+  # Robin only, Please specify any compute helm annotations
+  annotations:
+    robin.io/robinrpool: default
+    robin.io/roundrobin: host
+  # Node labels for playground pod assignment
+  # Ref: https://kubernetes.io/docs/user-guide/node-selection/
+  #
+  nodeSelector: {}
+  # Configurables for the persistence.
+  # This assumes there is a storage class always available that 
+  # can carve out a volume when the pod comes up and subsequently
+  # binds a PVC to the PV
+  persistentVolume:
+    ## artifactory data Persistent Volume access modes
+    ## Must match those of dynamic provisioner
+    accessMode: ReadWriteOnce
+    ## artifactory data Persistent Volume mount root path
+    ##
+    mountPath: /home
+    ## artifactory data Persistent Volume size
+    size: 10Gi
+    # name of the storage class which provides Dynamic provisioning 
+    storageClass: "robin"
+    # Robin only, Please specify any storage helm annotations
+    annotations:
+      robin.io/rpool: default
+# The event server, used to manage and channelise the events in the app
+eventserver:
+  # eventserver container name
+  name: eventserver
+  # the repository for the docker image and the tag of the image
+  # Compute and the memory needed by the pod
+  image:
+    # the repository for the docker image and the tag of the image
+    repository: artifactory.robinsystems.com/docker/mdcap/helm/mdcap-eventserver
+    tag: 1.7.1-7
+    pullPolicy: IfNotPresent
+  # Compute and the memory needed by the pod
+  resources:
+    limits:
+      cpu: 1
+      memory: 1Gi
+    requests:
+      cpu: 1
+      memory: 1Gi
+  livenessProbe:
+    failureThreshold: 2
+    initialDelaySeconds: 5
+    periodSeconds: 2
+    successThreshold: 1
+    timeoutSeconds: 2
+  readinessProbe:
+    failureThreshold: 2
+    initialDelaySeconds: 5
+    periodSeconds: 2
+    successThreshold: 1
+    timeoutSeconds: 2
+  # Robin only, Please specify any compute helm annotations
+  annotations:
+    robin.io/robinrpool: default
+    robin.io/roundrobin: host
+  # Node labels for eventserver pod assignment
+  # Ref: https://kubernetes.io/docs/user-guide/node-selection/
+  #
+  nodeSelector: {}
+  # Configurables for the persistence.
+  # This assumes there is a storage class always available that 
+  # can carve out a volume when the pod comes up and subsequently
+  # binds a PVC to the PV
+  persistentVolume:
+    ## artifactory data Persistent Volume access modes
+    ## Must match those of dynamic provisioner
+    accessMode: ReadWriteOnce
+    ## artifactory data Persistent Volume mount root path
+    ##
+    mountPath: /data
+    ## artifactory data Persistent Volume size
+    size: 1Gi
+    # name of the storage class which provides Dynamic provisioning 
+    storageClass: "robin"
+    # Robin only, Please specify any storage helm annotations
+    annotations:
+      robin.io/rpool: default
+# Highly available Postgres Database to connect to
+postgres:
+  # Database user name
+  user: ""
+  # Database password
+  password: ""
+  # Database port
+  server: ""
+  # Database port
+  port: ""
+  # Database name to connect to
+  database: ""
+# Dashboard provides the Graphical User Interface for the application
+dashboard:
+  # dashboard container name
+  name: dashboard
+  image:
+    repository: artifactory.robinsystems.com/docker/mdcap/helm/mdcap-dashboard-src
+    tag: 1.7.1-7
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: 1
+      memory: 3Gi
+    requests:
+      cpu: 1
+      memory: 3Gi
+  livenessProbe:
+    failureThreshold: 30
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 5
+  readinessProbe:
+    failureThreshold: 30
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 5
+  # Node labels for dashboard pod assignment
+  # Ref: https://kubernetes.io/docs/user-guide/node-selection/
+  #
+  nodeSelector: {}
+  # Robin only, Please specify any compute helm annotations
+  annotations:
+    robin.io/robinrpool: default
+    robin.io/roundrobin: host
+# The brain of the app. This manages all the functions, tasks, workflows,
+# batches and provides the API support for each component.
+engine:
+  # engine container name 
+  name: engine
+  # SOURCE ONLY, FOR LOCAL CONSUMPTION: Source Code Mount on a Host Path.
+  # Set this to mount Source Code into engine.
+  # Specify the absolute path to source code. This will be mounted inside the
+  # engine container. The path inside dcap source code will be:
+  # if MDCAPROOT is where dcap source code is cloned. The path will be:
+  #   
+  #   ${MDCAPROOT}/helm/build/app
+  #
+  # Make sure the above path is valid, there is no check to valide this.
+  #
+  # If there are multiple nodes in the setup, use engine's nodeSelector below.
+  # 
+  # NB: please make sure this value is not committed as this will break the
+  # install for others.
+  mountSrcHostPath: ""
+  # compute and memory resources that need to be allocated to the container. 
+  image:
+    repository: artifactory.robinsystems.com/docker/mdcap/helm/mdcap-engine-src
+    tag: 1.7.1-7
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: 1
+      memory: 1Gi
+    requests:
+      cpu: 1
+      memory: 1Gi
+  # liveness probe configuration options
+  livenessProbe:
+    failureThreshold: 5
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    tcpSocket:
+      port: 8000
+    timeoutSeconds: 2
+  # readiness probe configuration options
+  readinessProbe:
+    failureThreshold: 5
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    tcpSocket:
+      port: 8000
+    timeoutSeconds: 2
+  # number of replicas you wish to spin-up for the release.
+  # If unsure, leave it to 1
+  replicaCount: 1
+  # The server on which the engin's server runs. Leave it untouched, if unsure.
+  rorcPort: 8000
+  # Robin only, Please specify any compute helm annotations
+  annotations:
+    robin.io/robinrpool: default
+    robin.io/roundrobin: host
+  # Node labels for engine pod assignment
+  # Ref: https://kubernetes.io/docs/user-guide/node-selection/
+  #
+  nodeSelector: {}
+# The load balancer of the app. Segregates and load balances the APIs issues by the 
+# remote clients based on the URI types and delivers them to their correct recipient/endpoint
+# with in the app.
+nginx:
+  # nginx container name
+  name: nginx
+  # number of replicas you wish to spin-up for the release.
+  # If unsure, leave it to 1
+  replicaCount: 1
+  # Container image repository specification along with the tag
+  # This will be pulled from the repository to deploy the container. 
+  image:
+    repository: artifactory.robinsystems.com/docker/mdcap/helm/nginx
+    tag: stable-alpine
+    pullPolicy: IfNotPresent
+  # The CPU and the memory request for the artifactory pod.
+  resources:
+    limits:
+      cpu: 2
+      memory: 1Gi
+    requests:
+      cpu: 2
+      memory: 1Gi
+  # Robin only, Please specify any compute helm annotations
+  annotations:
+    robin.io/robinrpool: default
+    robin.io/roundrobin: host
+  # Node labels for nginx pod assignment
+  # Ref: https://kubernetes.io/docs/user-guide/node-selection/
+  #
+  nodeSelector: {}
+  livenessProbe:
+    failureThreshold: 20
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds:
+  readinessProbe:
+    failureThreshold: 20
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds:
+  # The env variables the are set in the load balancer
+  env:
+    httpsNodePort: 30443
+    # httpsNodePort is the nodeport for the https APIs. This node port you will need to 
+    # specify on your browser to have an access to GUI. You need to provide an unallocated 
+    # port number between 30000 - 32676. If the value provided for the node port is already
+    # being used, you will hit an error saying: 
+    #   "Invalid value: <portNumber>: provided port is already allocated"
+    # just uninstall the app using helm uninstall <release name> provide another port number
+    #
+    # You may run the following command to list all the node ports already used in your cluster:
+    # 
+    #   kubectl get svc --all-namespaces -o go-template='{{range .items}}{{ $save := . }}{{range.spec.ports}}{{if .nodePort}}{{$save.metadata.namespace}}{{"/"}}{{$save.metadata.name}}{{" - "}}{{.name}}{{": "}}{{.nodePort}}{{"\n"}}{{end}}{{end}}{{end}}'
+    # 
+    # Just choose a node port value not present in the list
+
+    # httpNodePort is the nodeport for the http access by sub-components, other than APIs
+    # You need to provide an unallocated port number between 30000 - 32676. If the value 
+    # provided for the node port is already being used, you will hit an error saying: 
+    #   "Invalid value: <portNumber>: provided port is already allocated"
+    # just uninstall the app using helm uninstall <release name> provide another port number
+    #
+    # You may run the following command to list all the node ports already used in your cluster:
+    # 
+    #   kubectl get svc --all-namespaces -o go-template='{{range .items}}{{ $save := . }}{{range.spec.ports}}{{if .nodePort}}{{$save.metadata.namespace}}{{"/"}}{{$save.metadata.name}}{{" - "}}{{.name}}{{": "}}{{.nodePort}}{{"\n"}}{{end}}{{end}}{{end}}'
+    # 
+    # Just choose a node port value not present in the list
+    httpNodePort: 30080
+# The exporter for the nginx pod
+nginxExporter:
+  image:
+    repository: artifactory.robinsystems.com/docker/mdcap/helm/nginx/nginx-prometheus-exporter
+    tag: 0.7.0
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+# The default worker container. This is used to run all the workflows/batches
+taskrunner:
+  # Container image repository specification along with the tag
+  # This will be pulled from the repository to deploy the container. 
+  image:
+    repository: artifactory.robinsystems.com/docker/mdcap/helm/mdcap-worker
+    tag: 1.7.1-7
+  # Robin only, Please specify any compute helm annotations
+  annotations:
+    robin.io/robinrpool: default
+    robin.io/roundrobin: host
+# This is part of the metrics collection system of MDCAP.
+vmetrics:
+  # set enabled to true to bring up this service. It also brings up
+  # the graphana service. 
+  #
+  # NOTE: This requires volume access mode as ReadWriteMany (RWX) support 
+  # from the underlying storage class. Installation may fail, in case this 
+  # is enabled an storage class does not supports 
+  enabled: true
+  # metrics collection component container name
+  name: vmetrics
+  # Vmetrics image and version.
+  image:
+    repository: artifactory.robinsystems.com/docker/mdcap/helm/victoriametrics/victoria-metrics
+    tag: v1.60.0
+    pullPolicy: IfNotPresent
+  env:
+    vmetrics_np_port: 30428
+    # just a place holder and not used for now.
+    # You may run the following command to list all the node ports already used in your cluster:
+    # 
+    #   kubectl get svc --all-namespaces -o go-template='{{range .items}}{{ $save := . }}{{range.spec.ports}}{{if .nodePort}}{{$save.metadata.namespace}}{{"/"}}{{$save.metadata.name}}{{" - "}}{{.name}}{{": "}}{{.nodePort}}{{"\n"}}{{end}}{{end}}{{end}}'
+    # 
+    # Just choose a node port value not present in the list
+
+    retention_period: 1d
+  # Robin only, Please specify any compute helm annotations
+  annotations:
+    robin.io/robinrpool: default
+    robin.io/roundrobin: host
+  # Node labels for vmetrics pod assignment
+  # Ref: https://kubernetes.io/docs/user-guide/node-selection/
+  #
+  nodeSelector: {}
+  resources:
+    limits:
+      cpu: 1
+      memory: 1Gi
+    requests:
+      cpu: 1
+      memory: 1Gi
+  # The data stored by all the metrics collected uses this location to store
+  # them. The recomendation is based on the number of days the data is needed
+  # to persist in the storage.
+  persistentVolume:
+    accessMode: ReadWriteMany
+    mountPath: /victoria-metrics-data
+    size: 10Gi
+    storageClass: "robin"
+    # Robin only, Please specify any storage helm annotations
+    annotations:
+      robin.io/rpool: default
+  mdcapds:
+    #  site1_ip:
+    #  site2_ip:
+    #  site3_ip:
+    etcd:
+      ports:
+        data: 6611
+# Grafana is used for viewing from the vmetrics collector.
+grafana:
+  # Graph plotting component container name
+  name: grafana
+  # grafana ini has settings to share the dashboard panels, this is
+  # a configmap mounted as a file inside grafana.
+  ini:
+    path: "/etc/grafana/grafana.ini"
+  # Grafana image and version.
+  image:
+    repository: artifactory.robinsystems.com/docker/mdcap/helm/grafana/grafana
+    tag: 8.1.1
+    pullPolicy: IfNotPresent
+  env:
+    # we will not use this node port for now, we will be redirecting
+    # through nginx.
+    # You may run the following command to list all the node ports already used in your cluster:
+    # 
+    #   kubectl get svc --all-namespaces -o go-template='{{range .items}}{{ $save := . }}{{range.spec.ports}}{{if .nodePort}}{{$save.metadata.namespace}}{{"/"}}{{$save.metadata.name}}{{" - "}}{{.name}}{{": "}}{{.nodePort}}{{"\n"}}{{end}}{{end}}{{end}}'
+    # 
+    # Just choose a node port value not present in the list
+    grafana_np_port: 30300
+  # Robin only, Please specify any compute helm annotations
+  annotations:
+    robin.io/robinrpool: default
+    robin.io/roundrobin: host
+  # Node labels for vmetrics pod assignment
+  # Ref: https://kubernetes.io/docs/user-guide/node-selection/
+  #
+  nodeSelector: {}
+  auth:
+    username: admin
+    password: admin
+  resources:
+    limits:
+      cpu: 1
+      memory: 1Gi
+    requests:
+      cpu: 1
+      memory: 1Gi
+  persistentVolume:
+    accessMode: ReadWriteMany
+    mountPath: /etc/grafana
+    size: 10Gi
+    storageClass: "robin"
+    # Robin only, Please specify any storage helm annotations
+    annotations:
+      robin.io/rpool: default
+dbupgrade:
+  image:
+    repository: artifactory.robinsystems.com/docker/mdcap/helm/mdcap-dbupgrade
+    tag: 1.7.1-7
+    pullPolicy: IfNotPresent

@@ -1,0 +1,201 @@
+{{/*
+Copyright (C) 2021 Robin.io All Rights Reserved.
+*/}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-dashboard-entrypoint-configmap
+  namespace: {{ .Release.Namespace }}
+data:
+  {{ (.Files.Glob "scripts/web-entrypoint.sh").AsConfig | nindent 2 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-dashboard-probes-configmap
+  namespace: {{ .Release.Namespace }}
+data:
+  {{ (.Files.Glob "scripts/dashboard-probes.sh").AsConfig | nindent 2 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-dashboard-env
+  namespace: {{ .Release.Namespace }}
+data:
+  KEYCLOAK_SERVER: ""
+  MDCAP_SSL_CERTS_DIR: /etc/mdcap/certs
+  KEYCLOAK_REALM: ""
+  POD_NAME: {{ .Release.Name }}-dashboard
+  KEYCLOAK_CLIENT_ID: ""
+{{- if .Values.externalIp }}
+  KEYCLOAK_REDIRECT_URI: "https://{{ .Values.externalIp }}:{{ .Values.nginx.env.httpsNodePort }}/login"
+{{- else }}
+  KEYCLOAK_REDIRECT_URI: ""
+{{- end }}
+  MDCAP_NGINX_PLAYGROUND_PORT: "22"
+  MDCAP_PLAYGROUND_HOST: {{ .Release.Name }}-playground.{{ .Release.Namespace }}.svc.cluster.local
+  MDCAP_NGINX_HOST: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    role: {{ .Release.Name }}-dashboard-depl
+    release: {{ .Release.Name }}
+    app: {{ .Release.Name }}-dashboard
+  name: {{ template "dashboard.fullname" . }}
+{{- if .Values.dashboard.annotations }}
+  annotations:
+{{ toYaml .Values.dashboard.annotations | indent 4 }}
+{{- end }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-dashboard
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 30%
+      maxSurge: 1
+  template:
+    metadata:
+      annotations:
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8000"
+        prometheus.io/scheme: https
+        prometheus.io/scrape: "true"
+{{- if .Values.dashboard.annotations }}
+{{ toYaml .Values.dashboard.annotations | indent 8 }}
+{{- end }}
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/name: {{ .Release.Name }}-dashboard
+        release: {{ .Release.Name }}
+        app: {{ .Release.Name }}-dashboard
+      name: {{ .Release.Name }}-dashboard
+    spec:
+{{ if .Values.imageCredentials.registry }}
+      imagePullSecrets:
+        - name:  {{ .Release.Name }}-imagepull-secret
+{{ end }}
+{{ if .Values.dashboard.nodeSelector }}
+      nodeSelector:
+{{ toYaml .Values.dashboard.nodeSelector | indent 8 }}
+{{ end }}
+      containers:
+      #- command: ["/bin/sh"]
+      #  args: [ "-c", "sleep 99999"]
+      - command:
+        - /scripts/web-entrypoint.sh
+        - node
+        envFrom:
+        - configMapRef:
+            name: {{ .Release.Name }}-dashboard-env 
+        image: "{{ .Values.dashboard.image.repository }}:{{ .Values.dashboard.image.tag }}"
+        imagePullPolicy: "{{ .Values.dashboard.image.pullPolicy }}"
+        name: {{ .Release.Name }}-dashboard
+        livenessProbe:
+          exec:
+            command:
+            - bin/sh
+            - -c
+            - /.robin/scripts/probes/dashboard-probes.sh
+            - liveness
+{{ toYaml .Values.dashboard.livenessProbe | indent 10 }}
+        readinessProbe:
+          exec:
+            command:
+            - bin/sh
+            - -c
+            - /.robin/scripts/probes/dashboard-probes.sh
+            - readiness
+{{ toYaml .Values.dashboard.readinessProbe | indent 10 }}
+        resources:
+{{ toYaml .Values.dashboard.resources | indent 10 }}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /scripts/web-entrypoint.sh
+          name: {{ .Release.Name }}-dashboard-entrypoint-script
+          subPath: web-entrypoint.sh
+        - mountPath: /.robin/scripts/certs/cert.pem
+          name: cert-secret
+          readOnly: true
+          subPath: cert.pem
+        - mountPath: /.robin/scripts/certs/key.pem
+          name: key-secret
+          readOnly: true
+          subPath: key.pem
+        - mountPath: /.robin/scripts/probes/dashboard-probes.sh
+          name: {{ .Release.Name }}-dashboard-probes
+          subPath: dashboard-probes.sh
+      dnsConfig:
+        options:
+        - name: ndots
+          value: "1"
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: true
+      hostname: {{ .Release.Name }}-dashboard
+      priority: 0
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: default
+      serviceAccountName: default
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: {{ .Release.Name }}-dashboard-entrypoint-script
+        configMap:
+          name: {{ .Release.Name }}-dashboard-entrypoint-configmap
+          defaultMode: 0755
+      - name: cert-secret
+        secret:
+          secretName: {{ .Release.Name }}-cert-secret
+          defaultMode: 0420
+      - name: key-secret
+        secret:
+          secretName: {{ .Release.Name }}-key-secret
+          defaultMode: 0420
+      - name: {{ .Release.Name }}-dashboard-probes
+        configMap:
+          defaultMode: 0744
+          name: {{ .Release.Name }}-dashboard-probes-configmap
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-dashboard-plg
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+  - name: {{ .Release.Name }}-dashboard-plg
+    port: 3000
+    protocol: TCP
+    targetPort: 3000
+  selector:
+    app: {{ .Release.Name }}-dashboard
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-dashboard
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+  - name: {{ .Release.Name }}-dashboard
+    port: 8000
+    protocol: TCP
+    targetPort: 8000
+  selector:
+    app: {{ .Release.Name }}-dashboard
+  type: ClusterIP

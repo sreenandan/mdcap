@@ -1,0 +1,321 @@
+{{/*
+Copyright (C) 2021 Robin.io All Rights Reserved.
+*/}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-nginx-probes-configmap
+  namespace: {{ .Release.Namespace }}
+data:
+  {{ (.Files.Glob "scripts/nginx-probes.sh").AsConfig | nindent 2 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-nginx-entrypoint-configmap
+  namespace: {{ .Release.Namespace }}
+data:
+  {{ (.Files.Glob "scripts/nginx-entrypoint.sh").AsConfig | nindent 2 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-nginx-env
+  namespace: {{ .Release.Namespace }}
+data:
+  MDCAP_DASHBOARD_HOST: {{ .Release.Name }}-dashboard.{{ .Release.Namespace }}.svc.cluster.local
+  MDCAP_DASHBOARD_PLAYGROUND_HOST: {{ .Release.Name }}-dashboard-plg.{{ .Release.Namespace }}.svc.cluster.local
+  MDCAP_EVTSRV_HOST: {{ .Release.Name }}-eventserver.{{ .Release.Namespace }}.svc.cluster.local
+  WORKER_CONNECTIONS: "32768"
+  WORKER_PROCESSES: auto
+  MDCAP_CDN_URL: https://{{ .Release.Name }}-artifactory.{{ .Release.Namespace }}.svc.cluster.local:8443
+  MDCAP_LOG_HOST: {{ .Release.Name }}-logstore.{{ .Release.Namespace }}.svc.cluster.local
+  DEBUGMODE: "True"
+  MDCAP_PLAYGROUND_HOST: {{ .Release.Name }}-playground.{{ .Release.Namespace }}.svc.cluster.local
+  MDCAP_CDN_HTTP_URL: http://{{ .Release.Name }}-artifactory-np-01.{{ .Release.Namespace }}.svc.cluster.local:8080
+  PROXY_CONNECT_TIMEOUT: "3600"
+  PROXY_SEND_TIMEOUT: "3600"
+  CLIENT_MAX_BODY_SIZE: 100M
+  MDCAP_SSL_CERTS_DIR: /etc/mdcap/certs
+  POD_NAME: {{ .Release.Name }}-nginx
+  PROXY_READ_TIMEOUT: "3600"
+  SEND_TIMEOUT: "3600"
+  WORKER_RLIMIT_NOFILE: "65536"
+  MDCAP_ENGINE_HOST: {{ .Release.Name }}-engine.{{ .Release.Namespace }}.svc.cluster.local
+{{ if .Values.vmetrics.enabled }}
+  METRICS_IP: {{ .Release.Name }}-vmetrics.{{ .Release.Namespace }}.svc.cluster.local
+  METRICS_GRAFANA_IP: {{ .Release.Name }}-grafana.{{ .Release.Namespace }}.svc.cluster.local
+  METRICS_GRAFANA_DATA_DIR: {{ .Values.grafana.persistentVolume.mountPath}}
+{{ end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-nginx-exporter-env
+  namespace: {{ .Release.Namespace }}
+data:
+  URI: http://localhost:8080/stub_status
+  POD_NS: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: Pod
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    role: {{ .Release.Name }}-nginx-depl
+    release: {{ .Release.Name }}
+    app: {{ .Release.Name }}-nginx
+  name: {{ template "nginx.fullname" . }}
+{{- if .Values.nginx.annotations }}
+  annotations:
+{{ toYaml .Values.nginx.annotations | indent 4 }}
+{{- end }}
+spec:
+  replicas: {{ .Values.nginx.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-nginx
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 30%
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/name: {{ .Release.Name }}-nginx
+        release: {{ .Release.Name }}
+        app: {{ .Release.Name }}-nginx
+      annotations:
+        prometheus.io/path: /metrics
+        prometheus.io/port: "9113"
+        prometheus.io/scheme: http
+        prometheus.io/scrape: "true"
+{{- if .Values.nginx.annotations }}
+{{ toYaml .Values.nginx.annotations | indent 8 }}
+{{- end }}
+      name: {{ .Release.Name }}-nginx
+    spec:
+{{ if .Values.imageCredentials.registry }}
+      imagePullSecrets:
+        - name: {{ .Release.Name }}-imagepull-secret
+{{ end }}
+{{ if .Values.nginx.nodeSelector }}
+      nodeSelector:
+{{ toYaml .Values.nginx.nodeSelector | indent 8 }}
+{{ end }}
+      initContainers:
+      - name: artifactory-check
+        image: "{{ .Values.artifactory.image.repository }}:{{ .Values.artifactory.image.tag }}"  
+        command: ['sh', '-c', 'until curl -i -s -k -X HEAD https://{{ .Release.Name }}-artifactory.{{ .Release.Namespace }}.svc.cluster.local:8443/artifact/api/v1/mdcapbin/mdcap | grep -w 200; do echo waiting for artifactory; sleep 2; done;' ]
+        resources:
+              requests:
+                cpu: 500m
+                memory: 512Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+      - name: eventserver-check
+        image: "{{ .Values.artifactory.image.repository }}:{{ .Values.artifactory.image.tag }}"  
+        command: ['sh', '-c', 'until curl -i -s -k https://{{ .Release.Name }}-eventserver.{{ .Release.Namespace }}.svc.cluster.local:8000/ | grep -w 200; do echo waiting for eventserver; sleep 2; done;' ]
+        resources:
+              requests:
+                cpu: 500m
+                memory: 512Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+      - name: dashboard-check
+        image: "{{ .Values.artifactory.image.repository }}:{{ .Values.artifactory.image.tag }}"  
+        command: ['sh', '-c', 'until curl -i -s -k -X HEAD https://{{ .Release.Name }}-dashboard.{{ .Release.Namespace }}.svc.cluster.local:8000/ | grep -w 200; do echo waiting for dashboard; sleep 2; done;' ]
+        resources:
+              requests:
+                cpu: 500m
+                memory: 512Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+      - name: engine-check
+        image: "{{ .Values.artifactory.image.repository }}:{{ .Values.artifactory.image.tag }}" 
+        command: ['sh', '-c', 'until curl -i -s -k https://{{ .Release.Name }}-engine.{{ .Release.Namespace }}.svc.cluster.local:8000/api/v1/version | grep -w 200; do echo waiting for engine; sleep 2; done;' ]
+        resources:
+              requests:
+                cpu: 500m
+                memory: 512Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+      containers:
+      #- command: [ "/bin/sh" ]
+      #  args: [ "-c", "sleep 99999"]
+      - command:
+        - /scripts/nginx-entrypoint.sh
+        - nginx
+        - -g
+        - daemon off;
+        envFrom:
+        - configMapRef:
+            name: {{ .Release.Name }}-nginx-env
+        image: "{{ .Values.nginx.image.repository }}:{{ .Values.nginx.image.tag }}"
+        imagePullPolicy: "{{ .Values.nginx.image.pullPolicy }}"
+        livenessProbe:
+          exec:
+            command:
+            - bin/sh
+            - -c
+            - /.robin/scripts/probes/nginx-probes.sh
+            - liveness
+{{ toYaml .Values.nginx.livenessProbe | indent 10 }}
+        name: {{ .Release.Name }}-nginx
+        readinessProbe:
+          exec:
+            command:
+            - bin/sh
+            - -c
+            - /.robin/scripts/probes/nginx-probes.sh
+            - readiness
+{{ toYaml .Values.nginx.readinessProbe | indent 10 }}
+        resources:
+{{ toYaml .Values.nginx.resources | indent 10 }}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /scripts/nginx-entrypoint.sh
+          name: entrypoint-script
+          subPath: nginx-entrypoint.sh
+        - mountPath: /.robin/scripts/probes/nginx-probes.sh
+          name: {{ .Release.Name }}-nginx-probes
+          subPath: nginx-probes.sh
+        - mountPath: /etc/mdcap/certs/cert.pem
+          name: cert-secret
+          readOnly: true
+          subPath: cert.pem
+        - mountPath: /etc/mdcap/certs/key.pem
+          name: key-secret
+          readOnly: true
+          subPath: key.pem
+{{ if .Values.vmetrics.enabled }}
+        - mountPath: {{ .Values.grafana.persistentVolume.mountPath }}
+          name: {{ .Release.Name }}-grafana-data
+{{ end }}
+      - envFrom:
+        - configMapRef:
+            name: {{ .Release.Name }}-nginx-exporter-env
+        name: {{ .Release.Name }}-nginx-exporter
+        image: "{{ .Values.nginxExporter.image.repository }}:{{ .Values.nginxExporter.image.tag }}"
+        imagePullPolicy: "{{ .Values.nginxExporter.image.pullPolicy }}"
+        command: ['/bin/sh']
+        args: ['-c', '/usr/bin/exporter -nginx.retries 10 -nginx.scrape-uri ${URI}']
+        resources:
+{{ toYaml .Values.nginxExporter.resources | indent 10 }}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        ports:
+        - containerPort: 9113
+          name: metrics
+          protocol: TCP
+      dnsConfig:
+        options:
+        - name: ndots
+          value: "1"
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: true
+      hostname: {{ .Release.Name }}-nginx
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      serviceAccount: default
+      serviceAccountName: default
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: entrypoint-script
+        configMap:
+          name: {{ .Release.Name }}-nginx-entrypoint-configmap
+          defaultMode: 0755
+      - name: {{ .Release.Name }}-nginx-probes
+        configMap:
+          defaultMode: 0744
+          name: {{ .Release.Name }}-nginx-probes-configmap
+      - name: cert-secret
+        secret:
+          secretName: {{ .Release.Name }}-cert-secret
+          defaultMode: 0420
+      - name: key-secret
+        secret:
+          secretName: {{ .Release.Name }}-key-secret
+          defaultMode: 0420
+{{ if .Values.vmetrics.enabled }}
+      - name: {{ .Release.Name }}-grafana-data
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-grafana-pvc-data
+{{ end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-nginx-np-0
+  namespace: {{ .Release.Namespace }}
+spec:
+  externalTrafficPolicy: Cluster
+  selector:
+    app: {{ .Release.Name }}-nginx
+  type: NodePort
+  ports:
+    - name: nginx
+      port: 9443
+      protocol: TCP
+      targetPort: 443
+      nodePort: {{ .Values.nginx.env.httpsNodePort }}
+    - name: metrics
+      port: 9113
+      protocol: TCP
+      targetPort: 9113
+{{ if .Values.externalIp }}
+  externalIPs:
+    - {{ .Values.externalIp }}
+{{ end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-nginx-np-1
+  namespace: {{ .Release.Namespace }}
+spec:
+  externalTrafficPolicy: Cluster
+  selector:
+    app: {{ .Release.Name }}-nginx
+  type: NodePort
+  ports:
+    - name: plgconsole
+      port: 22
+      protocol: TCP
+      targetPort: 22
+      nodePort: {{ .Values.playground.env.sshNodePort }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-nginx-np-2
+  namespace: {{ .Release.Namespace }}
+spec:
+  externalTrafficPolicy: Cluster
+  selector:
+    app: {{ .Release.Name }}-nginx
+  type: NodePort
+  ports:
+    - name: stats
+      port: 8080
+      protocol: TCP
+      targetPort: 8080
+      nodePort: {{ .Values.nginx.env.httpNodePort }}
+---

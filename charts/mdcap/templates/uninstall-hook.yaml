@@ -1,0 +1,100 @@
+{{/*
+Copyright (C) 2021 Robin.io All Rights Reserved.
+*/}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-uninstallhook-entrypoint-configmap
+  namespace: {{ .Release.Namespace }}
+data:
+  {{ (.Files.Glob "scripts/uninstallhook-entrypoint.sh").AsConfig | nindent 2 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: {{ .Release.Name }}
+  name: {{ .Release.Name }}-uninstallhook-env
+  namespace: {{ .Release.Namespace }}
+data:
+  MDCAP_DEFAULT_CONTEXT: "https://{{ .Release.Name }}-engine.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.engine.rorcPort }}"
+  MDCAP_SSL_CERTS_DIR: /etc/mdcap/certs
+  POD_NAME: {{ .Release.Name }}-deletehook
+  POD_NAMESPACE: {{ .Release.Namespace }}
+  ADD_DELAY_SEC_BEFORE_UNINSTALL: ""
+  MDCAP_RELEASE_NAME: {{ .Release.Name | quote }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+   name: {{ .Release.Name }}-predelete-hook
+   namespace: {{ .Release.Namespace }}
+   annotations:
+      "helm.sh/hook": "pre-delete"
+      "helm.sh/hook-delete-policy": hook-succeeded,hook-failed
+{{- if .Values.engine.annotations }}
+{{ toYaml .Values.engine.annotations | indent 6 }}
+{{- end }}
+spec:
+{{ if .Values.engine.nodeSelector }}
+  nodeSelector:
+{{ toYaml .Values.engine.nodeSelector | indent 4 }}
+{{ end }}
+{{ if .Values.imageCredentials.registry }}
+  imagePullSecrets:
+    - name:  {{ .Release.Name }}-imagepull-secret
+{{ end }}
+  containers:
+  - command:
+    - /uninstallhook-entrypoint.sh
+    - /bin/bash
+    envFrom:
+    - configMapRef:
+        name: {{ .Release.Name }}-uninstallhook-env
+    env:
+    - name: MDCAP_ADMIN_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          key: MDCAP_ADMIN_PASSWORD
+          name: {{ .Release.Name }}-engine-secret
+    image: "{{ .Values.taskrunner.image.repository }}:{{ .Values.taskrunner.image.tag }}"
+    imagePullPolicy: IfNotPresent
+    name: {{ .Release.Name }}-predelete-hook
+    resources:
+{{ toYaml .Values.engine.resources | indent 6 }}
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /uninstallhook-entrypoint.sh
+      name: entrypoint-script
+      subPath: uninstallhook-entrypoint.sh
+    - mountPath: /etc/mdcap/certs/cert.pem
+      name: cert-secret
+      readOnly: true
+      subPath: cert.pem
+    - mountPath: /etc/mdcap/certs/key.pem
+      name: key-secret
+      readOnly: true
+      subPath: key.pem
+  priority: 0
+  restartPolicy: Never
+  securityContext: {}
+  serviceAccount: default
+  serviceAccountName: default
+  terminationGracePeriodSeconds: 0
+  volumes:
+  - name: entrypoint-script
+    configMap:
+      name: {{ .Release.Name }}-uninstallhook-entrypoint-configmap
+      defaultMode: 0755
+  - name: cert-secret
+    secret:
+      secretName: {{ .Release.Name }}-cert-secret
+      defaultMode: 0420
+  - name: key-secret
+    secret:
+      secretName: {{ .Release.Name }}-key-secret
+      defaultMode: 0420
