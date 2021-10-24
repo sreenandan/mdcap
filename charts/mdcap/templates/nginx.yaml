@@ -66,8 +66,6 @@ data:
   URI: http://localhost:8080/stub_status
   POD_NS: {{ .Release.Namespace }}
 ---
-apiVersion: v1
-kind: Pod
 apiVersion: apps/v1
 kind: Deployment
 metadata:
